@@ -1,8 +1,8 @@
 name: Release Windows EXE
 
 on:
-  release:
-    types: [published]
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -47,9 +47,13 @@ jobs:
           name: sudoku-pdf-windows-x64
           path: release-assets/sudoku-pdf-windows-x64.zip
 
-      - name: Attach asset to GitHub Release
-        if: github.event_name == 'release'
+      - name: Publish asset to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: main-latest
+          target_commitish: ${{ github.sha }}
+          name: Main Latest Build
+          prerelease: true
+          make_latest: false
           files: release-assets/sudoku-pdf-windows-x64.zip
           overwrite_files: true
