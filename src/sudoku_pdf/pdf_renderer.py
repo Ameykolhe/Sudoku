@@ -2,12 +2,77 @@
 
 from __future__ import annotations
 
+import logging
 from typing import List, Optional
 
-from reportlab.lib.pagesizes import A4, letter
+from reportlab.lib.pagesizes import A4, landscape, letter
 from reportlab.pdfgen import canvas
 
 from .models import Grid
+
+SIDE_PADDING = 18.0
+BOTTOM_PADDING = 18.0
+HEADER_BOTTOM_NO_LEGEND = 56.0
+HEADER_BOTTOM_WITH_LEGEND = 70.0
+MIN_GAP = 8.0
+LABEL_BAND_HEIGHT = 16.0
+LABEL_BASELINE_OFFSET = 4.0
+logger = logging.getLogger(__name__)
+
+
+def _compute_puzzle_size_for_page(
+    page_w: float,
+    page_h: float,
+    layout_rows: int,
+    layout_cols: int,
+    has_legend: bool,
+) -> float:
+    header_bottom = page_h - (
+        HEADER_BOTTOM_WITH_LEGEND if has_legend else HEADER_BOTTOM_NO_LEGEND
+    )
+    grid_area_w = page_w - 2 * SIDE_PADDING
+    grid_area_h = header_bottom - BOTTOM_PADDING
+    usable_h_for_grids = grid_area_h - layout_rows * LABEL_BAND_HEIGHT
+
+    return min(
+        (grid_area_w - (layout_cols + 1) * MIN_GAP) / float(layout_cols),
+        (usable_h_for_grids - (layout_rows + 1) * MIN_GAP) / float(layout_rows),
+    )
+
+
+def _pick_best_pagesize(
+    base_pagesize: tuple[float, float],
+    orientation: str,
+    layout_rows: int,
+    layout_cols: int,
+) -> tuple[float, float]:
+    normalized = orientation.lower()
+    if normalized == "portrait":
+        logger.debug("Orientation override selected: portrait.")
+        return base_pagesize
+    if normalized == "landscape":
+        logger.debug("Orientation override selected: landscape.")
+        return landscape(base_pagesize)
+
+    portrait_w, portrait_h = base_pagesize
+    landscape_w, landscape_h = landscape(base_pagesize)
+
+    portrait_score = min(
+        _compute_puzzle_size_for_page(portrait_w, portrait_h, layout_rows, layout_cols, False),
+        _compute_puzzle_size_for_page(portrait_w, portrait_h, layout_rows, layout_cols, True),
+    )
+    landscape_score = min(
+        _compute_puzzle_size_for_page(landscape_w, landscape_h, layout_rows, layout_cols, False),
+        _compute_puzzle_size_for_page(landscape_w, landscape_h, layout_rows, layout_cols, True),
+    )
+    logger.debug(
+        "Auto orientation scores for %sx%s layout: portrait=%.2f, landscape=%.2f",
+        layout_rows,
+        layout_cols,
+        portrait_score,
+        landscape_score,
+    )
+    return landscape(base_pagesize) if landscape_score > portrait_score else base_pagesize
 
 
 def draw_sudoku_grid(
@@ -21,7 +86,7 @@ def draw_sudoku_grid(
     show_numbers: bool = True,
 ) -> None:
     pdf.setFont("Helvetica-Bold", 10)
-    pdf.drawString(x, y + size + 10, label)
+    pdf.drawString(x, y + size + LABEL_BASELINE_OFFSET, label)
 
     cell = size / 9.0
 
@@ -48,7 +113,7 @@ def draw_sudoku_grid(
                 continue
 
             if reference_puzzle is None:
-                pdf.setFont("Helvetica", 11)
+                pdf.setFont("Helvetica-Bold", 11)
                 pdf.setFillColorRGB(0, 0, 0)
             elif reference_puzzle[row][col] != 0:
                 pdf.setFont("Helvetica-Bold", 11)
@@ -71,43 +136,55 @@ def draw_grid_page(
     title: str,
     grids: List[Grid],
     labels: List[str],
+    layout_rows: int,
+    layout_cols: int,
     reference_puzzles: Optional[List[Grid]] = None,
     legend: Optional[str] = None,
 ) -> None:
+    logger.debug("Rendering page '%s' with %d grid(s).", title, len(grids))
     pdf.setFont("Helvetica-Bold", 16)
     pdf.drawCentredString(page_w / 2, page_h - 36, title)
 
-    side_padding = 18
-    bottom_padding = 18
-    header_bottom = page_h - (70 if legend else 56)
-    label_space = 14
+    header_bottom = page_h - (HEADER_BOTTOM_WITH_LEGEND if legend else HEADER_BOTTOM_NO_LEGEND)
 
     if legend:
         pdf.setFont("Helvetica", 9)
         pdf.drawCentredString(page_w / 2, page_h - 52, legend)
 
-    # Fit a 3x3 square-grid layout with equal outer/inner spacing.
-    grid_area_w = page_w - 2 * side_padding
-    grid_area_h = header_bottom - bottom_padding
-    usable_h = grid_area_h - label_space
-    min_gap = 8.0
+    # Fit the requested layout with equal outer/inner spacing.
+    grid_area_w = page_w - 2 * SIDE_PADDING
+    grid_area_h = header_bottom - BOTTOM_PADDING
+    usable_h_for_grids = grid_area_h - layout_rows * LABEL_BAND_HEIGHT
 
-    puzzle_size = min((grid_area_w - 4 * min_gap) / 3.0, (usable_h - 4 * min_gap) / 3.0)
+    puzzle_size = _compute_puzzle_size_for_page(
+        page_w=page_w,
+        page_h=page_h,
+        layout_rows=layout_rows,
+        layout_cols=layout_cols,
+        has_legend=legend is not None,
+    )
     if puzzle_size <= 0:
         raise RuntimeError("Page layout is too tight to render puzzles.")
+    logger.debug(
+        "Computed layout metrics for '%s': size=%.2f, rows=%d, cols=%d.",
+        title,
+        puzzle_size,
+        layout_rows,
+        layout_cols,
+    )
 
-    gap_x = (grid_area_w - 3 * puzzle_size) / 4.0
-    gap_y = (usable_h - 3 * puzzle_size) / 4.0
-    start_x = side_padding + gap_x
-    start_y = bottom_padding + gap_y
+    gap_x = (grid_area_w - layout_cols * puzzle_size) / float(layout_cols + 1)
+    gap_y = (usable_h_for_grids - layout_rows * puzzle_size) / float(layout_rows + 1)
+    start_x = SIDE_PADDING + gap_x
+    start_y = BOTTOM_PADDING + gap_y
 
     index = 0
-    for row in range(3):
-        for col in range(3):
+    for row in range(layout_rows):
+        for col in range(layout_cols):
             if index >= len(grids):
                 break
             x = start_x + col * (puzzle_size + gap_x)
-            y = start_y + (2 - row) * (puzzle_size + gap_y)
+            y = start_y + (layout_rows - 1 - row) * (puzzle_size + LABEL_BAND_HEIGHT + gap_y)
             draw_sudoku_grid(
                 pdf=pdf,
                 x=x,
@@ -130,10 +207,28 @@ def build_combined_pdf(
     solutions: List[Grid],
     out_path: str,
     page_size_name: str,
+    orientation: str,
+    layout_rows: int,
+    layout_cols: int,
     difficulty_name: str,
 ) -> None:
-    pagesize = letter if page_size_name.lower() == "letter" else A4
+    base_pagesize = letter if page_size_name.lower() == "letter" else A4
+    pagesize = _pick_best_pagesize(
+        base_pagesize=base_pagesize,
+        orientation=orientation,
+        layout_rows=layout_rows,
+        layout_cols=layout_cols,
+    )
     page_w, page_h = pagesize
+    resolved_orientation = "landscape" if page_w > page_h else "portrait"
+    logger.info(
+        "Rendering PDF to %s (%s, %s orientation, layout=%sx%s).",
+        out_path,
+        page_size_name,
+        resolved_orientation,
+        layout_rows,
+        layout_cols,
+    )
     pdf = canvas.Canvas(out_path, pagesize=pagesize)
 
     puzzle_labels = [f"Puzzle {index + 1}" for index in range(len(puzzles))]
@@ -144,7 +239,10 @@ def build_combined_pdf(
         title=f"SUDOKU - {difficulty_name.capitalize()} Difficulty",
         grids=puzzles,
         labels=puzzle_labels,
+        layout_rows=layout_rows,
+        layout_cols=layout_cols,
     )
+    logger.info("Rendered puzzles page.")
     pdf.showPage()
 
     solution_labels = [f"Puzzle {index + 1} Solution" for index in range(len(solutions))]
@@ -155,9 +253,12 @@ def build_combined_pdf(
         title=f"SUDOKU - Solutions ({difficulty_name.capitalize()})",
         grids=solutions,
         labels=solution_labels,
+        layout_rows=layout_rows,
+        layout_cols=layout_cols,
         reference_puzzles=puzzles,
         legend="Bold black numbers are original clues. Blue numbers are filled solution values.",
     )
+    logger.info("Rendered solutions page.")
     pdf.showPage()
     pdf.save()
-
+    logger.info("PDF save complete.")

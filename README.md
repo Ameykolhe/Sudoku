@@ -1,8 +1,8 @@
 # Sudoku PDF Generator
 
 Generate one printable PDF with two pages:
-- page 1: 9 Sudoku puzzles (3x3 layout)
-- page 2: matching 9 solutions (3x3 layout)
+- page 1: Sudoku puzzles in your selected layout
+- page 2: matching solutions in the same layout
 
 ## Setup
 
@@ -18,10 +18,19 @@ pip install -e .
 sudoku-pdf
 sudoku-pdf --out sudoku.pdf
 sudoku-pdf --difficulty hard --page-size letter --seed 42
+sudoku-pdf --layout 3x2 --orientation landscape
+sudoku-pdf --layout 3x3 --puzzles-per-page 8
+sudoku-pdf --layout 1x3 --log-level debug
 ```
 
 By default, each run generates a new random set of puzzles.  
 Use `--seed <number>` only when you want reproducible output.
+
+Layout and page options:
+- `--layout ROWSxCOLS` controls puzzle arrangement per page (for example `3x3`, `3x2`, `2x2`).
+- `--puzzles-per-page N` limits how many puzzles are rendered (must be `<= ROWS*COLS`).
+- `--orientation auto|portrait|landscape` controls page direction (`auto` picks the best fit for the chosen layout).
+- `--log-level info|debug` controls runtime progress logging.
 
 On the solutions page:
 - bold black digits are the original puzzle clues
