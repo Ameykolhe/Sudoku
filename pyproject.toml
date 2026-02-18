@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sudoku-pdf-generator"
+version = "0.1.0"
+description = "Generate printable Sudoku puzzle and solution PDFs."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+  "reportlab>=4.0.0",
+]
+
+[project.scripts]
+sudoku-pdf = "sudoku_pdf.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
