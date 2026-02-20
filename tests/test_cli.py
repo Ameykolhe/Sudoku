@@ -23,15 +23,27 @@ class TestCliLayoutParsing(unittest.TestCase):
         self.assertEqual(args.orientation, "auto")
         self.assertEqual(args.log_level, "info")
         self.assertIsNone(args.puzzles_per_page)
+        self.assertEqual(args.pages, 1)
+        self.assertEqual(args.page_order, "sequential")
+
+    def test_parse_args_page_order_choices(self) -> None:
+        self.assertEqual(parse_args(["--page-order", "alternate"]).page_order, "alternate")
+        self.assertEqual(parse_args(["--page-order", "sequential"]).page_order, "sequential")
 
     def test_resolve_puzzle_count_uses_layout_capacity_by_default(self) -> None:
         self.assertEqual(resolve_puzzle_count(rows=3, cols=2, puzzles_per_page=None), 6)
+        self.assertEqual(resolve_puzzle_count(rows=3, cols=2, puzzles_per_page=None, pages=2), 12)
 
     def test_resolve_puzzle_count_rejects_invalid_values(self) -> None:
         with self.assertRaises(ValueError):
             resolve_puzzle_count(rows=3, cols=2, puzzles_per_page=0)
         with self.assertRaises(ValueError):
             resolve_puzzle_count(rows=3, cols=2, puzzles_per_page=7)
+
+    def test_pages_zero_causes_system_exit(self) -> None:
+        from sudoku_pdf.cli import main
+        with self.assertRaises(SystemExit):
+            main(["--pages", "0"])
 
 
 if __name__ == "__main__":

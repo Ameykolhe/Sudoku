@@ -36,10 +36,11 @@ def resolve_puzzle_count(
     rows: int,
     cols: int,
     puzzles_per_page: Optional[int],
+    pages: int = 1,
 ) -> int:
     max_capacity = rows * cols
     if puzzles_per_page is None:
-        return max_capacity
+        return max_capacity * pages
     if puzzles_per_page <= 0:
         raise ValueError("--puzzles-per-page must be a positive integer.")
     if puzzles_per_page > max_capacity:
@@ -47,7 +48,7 @@ def resolve_puzzle_count(
             f"--puzzles-per-page ({puzzles_per_page}) exceeds layout capacity "
             f"({rows}x{cols} => {max_capacity})."
         )
-    return puzzles_per_page
+    return puzzles_per_page * pages
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
@@ -95,6 +96,23 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
         help="How many puzzles to place on each page (must be <= layout capacity)",
     )
     parser.add_argument(
+        "--pages",
+        type=int,
+        default=1,
+        help="Number of puzzle pages to generate (default: 1)",
+    )
+    parser.add_argument(
+        "--page-order",
+        default="sequential",
+        choices=["sequential", "alternate"],
+        help=(
+            "Order of puzzle and solution pages. "
+            "`sequential`: all puzzle pages then all solution pages. "
+            "`alternate`: puzzle page followed immediately by its solution page "
+            "(good for back-to-back/duplex printing)."
+        ),
+    )
+    parser.add_argument(
         "--log-level",
         default="info",
         choices=LOG_LEVEL_CHOICES,
@@ -125,11 +143,17 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     difficulty = DIFFICULTIES[args.difficulty]
     layout_rows, layout_cols = args.layout
 
+    if args.pages < 1:
+        raise SystemExit("--pages must be a positive integer.")
+
+    effective_ppp = args.puzzles_per_page or (layout_rows * layout_cols)
+
     try:
         puzzle_count = resolve_puzzle_count(
             rows=layout_rows,
             cols=layout_cols,
             puzzles_per_page=args.puzzles_per_page,
+            pages=args.pages,
         )
     except ValueError as exc:
         raise SystemExit(str(exc)) from exc
@@ -144,11 +168,13 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         raise
 
     logger.info(
-        "Starting generation: difficulty=%s, layout=%sx%s, puzzles=%d, page_size=%s, orientation=%s",
+        "Starting generation: difficulty=%s, layout=%sx%s, puzzles=%d, pages=%d, page_order=%s, page_size=%s, orientation=%s",
         difficulty.name,
         layout_rows,
         layout_cols,
         puzzle_count,
+        args.pages,
+        args.page_order,
         args.page_size,
         args.orientation,
     )
@@ -172,6 +198,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         layout_rows=layout_rows,
         layout_cols=layout_cols,
         difficulty_name=difficulty.name,
+        puzzles_per_page=effective_ppp,
+        page_order=args.page_order,
     )
     logger.info("Wrote combined PDF (puzzles + solutions): %s", args.out)
 

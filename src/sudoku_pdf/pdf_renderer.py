@@ -85,7 +85,7 @@ def draw_sudoku_grid(
     reference_puzzle: Optional[Grid] = None,
     show_numbers: bool = True,
 ) -> None:
-    pdf.setFont("Helvetica-Bold", 10)
+    pdf.setFont("Helvetica-Bold", 12)
     pdf.drawString(x, y + size + LABEL_BASELINE_OFFSET, label)
 
     cell = size / 9.0
@@ -113,13 +113,13 @@ def draw_sudoku_grid(
                 continue
 
             if reference_puzzle is None:
-                pdf.setFont("Helvetica-Bold", 11)
+                pdf.setFont("Helvetica-Bold", 16)
                 pdf.setFillColorRGB(0, 0, 0)
             elif reference_puzzle[row][col] != 0:
-                pdf.setFont("Helvetica-Bold", 11)
+                pdf.setFont("Helvetica-Bold", 16)
                 pdf.setFillColorRGB(0, 0, 0)
             else:
-                pdf.setFont("Helvetica", 11)
+                pdf.setFont("Helvetica", 16)
                 pdf.setFillColorRGB(0.15, 0.28, 0.62)
 
             text_x = x + col * cell + cell / 2
@@ -142,13 +142,13 @@ def draw_grid_page(
     legend: Optional[str] = None,
 ) -> None:
     logger.debug("Rendering page '%s' with %d grid(s).", title, len(grids))
-    pdf.setFont("Helvetica-Bold", 16)
+    pdf.setFont("Helvetica-Bold", 20)
     pdf.drawCentredString(page_w / 2, page_h - 36, title)
 
     header_bottom = page_h - (HEADER_BOTTOM_WITH_LEGEND if legend else HEADER_BOTTOM_NO_LEGEND)
 
     if legend:
-        pdf.setFont("Helvetica", 9)
+        pdf.setFont("Helvetica", 11)
         pdf.drawCentredString(page_w / 2, page_h - 52, legend)
 
     # Fit the requested layout with equal outer/inner spacing.
@@ -211,6 +211,8 @@ def build_combined_pdf(
     layout_rows: int,
     layout_cols: int,
     difficulty_name: str,
+    puzzles_per_page: int = 0,
+    page_order: str = "sequential",
 ) -> None:
     base_pagesize = letter if page_size_name.lower() == "letter" else A4
     pagesize = _pick_best_pagesize(
@@ -231,34 +233,64 @@ def build_combined_pdf(
     )
     pdf = canvas.Canvas(out_path, pagesize=pagesize)
 
-    puzzle_labels = [f"Puzzle {index + 1}" for index in range(len(puzzles))]
-    draw_grid_page(
-        pdf=pdf,
-        page_w=page_w,
-        page_h=page_h,
-        title=f"SUDOKU - {difficulty_name.capitalize()} Difficulty",
-        grids=puzzles,
-        labels=puzzle_labels,
-        layout_rows=layout_rows,
-        layout_cols=layout_cols,
-    )
-    logger.info("Rendered puzzles page.")
-    pdf.showPage()
+    effective_ppp = puzzles_per_page if puzzles_per_page > 0 else len(puzzles)
+    chunks = [
+        (puzzles[i : i + effective_ppp], solutions[i : i + effective_ppp])
+        for i in range(0, len(puzzles), effective_ppp)
+    ]
+    num_pages = len(chunks)
 
-    solution_labels = [f"Puzzle {index + 1} Solution" for index in range(len(solutions))]
-    draw_grid_page(
-        pdf=pdf,
-        page_w=page_w,
-        page_h=page_h,
-        title=f"SUDOKU - Solutions ({difficulty_name.capitalize()})",
-        grids=solutions,
-        labels=solution_labels,
-        layout_rows=layout_rows,
-        layout_cols=layout_cols,
-        reference_puzzles=puzzles,
-        legend="Bold black numbers are original clues. Blue numbers are filled solution values.",
-    )
-    logger.info("Rendered solutions page.")
-    pdf.showPage()
+    def puzzle_title(page_idx: int) -> str:
+        base = f"SUDOKU - {difficulty_name.capitalize()} Difficulty"
+        return f"{base} (Page {page_idx + 1} of {num_pages})" if num_pages > 1 else base
+
+    def solution_title(page_idx: int) -> str:
+        base = f"SUDOKU - Solutions ({difficulty_name.capitalize()})"
+        return f"{base} (Page {page_idx + 1} of {num_pages})" if num_pages > 1 else base
+
+    def render_puzzle_page(page_idx: int, puz_chunk: List[Grid]) -> None:
+        global_offset = page_idx * effective_ppp
+        labels = [f"Puzzle {global_offset + j + 1}" for j in range(len(puz_chunk))]
+        draw_grid_page(
+            pdf=pdf,
+            page_w=page_w,
+            page_h=page_h,
+            title=puzzle_title(page_idx),
+            grids=puz_chunk,
+            labels=labels,
+            layout_rows=layout_rows,
+            layout_cols=layout_cols,
+        )
+        logger.info("Rendered puzzles page %d of %d.", page_idx + 1, num_pages)
+        pdf.showPage()
+
+    def render_solution_page(page_idx: int, puz_chunk: List[Grid], sol_chunk: List[Grid]) -> None:
+        global_offset = page_idx * effective_ppp
+        labels = [f"Puzzle {global_offset + j + 1} Solution" for j in range(len(sol_chunk))]
+        draw_grid_page(
+            pdf=pdf,
+            page_w=page_w,
+            page_h=page_h,
+            title=solution_title(page_idx),
+            grids=sol_chunk,
+            labels=labels,
+            layout_rows=layout_rows,
+            layout_cols=layout_cols,
+            reference_puzzles=puz_chunk,
+            legend="Bold black numbers are original clues. Blue numbers are filled solution values.",
+        )
+        logger.info("Rendered solutions page %d of %d.", page_idx + 1, num_pages)
+        pdf.showPage()
+
+    if page_order == "alternate":
+        for page_idx, (puz_chunk, sol_chunk) in enumerate(chunks):
+            render_puzzle_page(page_idx, puz_chunk)
+            render_solution_page(page_idx, puz_chunk, sol_chunk)
+    else:  # sequential
+        for page_idx, (puz_chunk, _) in enumerate(chunks):
+            render_puzzle_page(page_idx, puz_chunk)
+        for page_idx, (puz_chunk, sol_chunk) in enumerate(chunks):
+            render_solution_page(page_idx, puz_chunk, sol_chunk)
+
     pdf.save()
     logger.info("PDF save complete.")
